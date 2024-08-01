@@ -29,37 +29,35 @@ public class QuoteService : IQuoteService
         if (quoteWithProductsDto is null || quoteWithProductsDto is { Products: null } or { Quote: null })
             throw new BadRequestException(ExceptionMessages.EMPTY_FIELDS);
 
-        var customerExists = await _unitOfWork.CustomerRepository.GetAsync(c => c.CustomerId == quoteWithProductsDto.Quote.CustomerId);
-
-        if (customerExists is null)
-            throw new NotFoundException(ExceptionMessages.CUSTOMER_NOT_FOUND);
+        await EnsureCustomerExists(quoteWithProductsDto.Quote.CustomerId);
 
         var quote = _mapper.Map<Quote>(quoteWithProductsDto.Quote);
 
-        foreach (var product in quoteWithProductsDto.Products)
+        foreach (var productDto in quoteWithProductsDto.Products)
         {
-            var productExists = await _unitOfWork.ProductRepository.GetAsync(e => e.ProductId == product.ProductId);
-
-            if (productExists is null)
-                throw new NotFoundException(ExceptionMessages.PRODUCT_NOT_FOUND);
-
-            if (quote.QuotesProducts.Any(qp => qp.ProductId == product.ProductId))
-                throw new ConflictException(ExceptionMessages.PRODUCT_DUPLICATED);
-
-            var quoteProduct = _mapper.Map<QuoteProducts>(product);
-
-            quote.QuotesProducts.Add(quoteProduct);
+            var product = await EnsureProductExists(productDto.ProductId);
+            AddProductToQuote(quote, productDto, product);
         }
 
         quote.TotalPrice = quote.QuotesProducts.Sum(p => p.Price * p.Quantity);
 
         await _unitOfWork.QuotesRepository.CreateAsync(quote);
-
         await _unitOfWork.CommitAsync();
 
-        await SaveInvoiceOnQuote(quote.QuoteId);
-
         return _mapper.Map<QuoteResponseDTO>(quote);
+    }
+
+    public async Task SaveInvoiceOnQuote(int id)
+    {
+        var detailedQuote = await GetQuoteDetailsById(id);
+
+        detailedQuote.FileUrl = await _invoiceService.GenerateInvoiceUrl(detailedQuote);
+
+        var updatedQuote = _mapper.Map<Quote>(detailedQuote);
+
+        _unitOfWork.QuotesRepository.Update(updatedQuote);
+
+        await _unitOfWork.CommitAsync();
     }
 
     public async Task<(IEnumerable<QuoteResponseDTO>, object)> GetAllQuotes(QueryParameters quoteParams)
@@ -90,7 +88,7 @@ public class QuoteService : IQuoteService
     {
         var quotesEntities = await _unitOfWork.QuotesRepository.SearchQuotesAsync(quoteFilterParams);
 
-        if (quotesEntities is null)
+        if (quotesEntities is null || !quotesEntities.Any())
             throw new NotFoundException(ExceptionMessages.QUOTE_SEARCH_NOT_FOUND);
 
         var quotesPaginated = quotesEntities.ToPagedList(quoteFilterParams.PageNumber, quoteFilterParams.PageSize);
@@ -112,63 +110,45 @@ public class QuoteService : IQuoteService
 
     public async Task<QuoteDetailedResponseDTO> GetQuoteDetailsById(int id)
     {
-        var quote = await GetDetailedQuoteDtoAsync(id);
-
-        if (quote is null)
-            throw new NotFoundException(ExceptionMessages.QUOTE_NOT_FOUND);
-
-        return quote;
-    }
-
-    private async Task<QuoteDetailedResponseDTO?> GetDetailedQuoteDtoAsync(int id)
-    {
         var quote = await _unitOfWork.QuotesRepository.GetDetailedQuoteAsync(id);
 
-        if (quote is not null)
-        {
-            var quoteDetailedDto = _mapper.Map<QuoteDetailedResponseDTO>(quote);
-
-            return quoteDetailedDto;
-        }
-
-        return null;
-    }
-
-    private async Task<string> UploadInvoiceDocument(QuoteDetailedResponseDTO quote)
-    {
-        var invoiceDocument = _invoiceService.GenerateInvoiceDocument(quote);
-
-        var fileName = $"invoice_{quote.CreatedAt:yyyyMMddTHHmmss}_{quote.QuoteId:d8}.pdf";
-
-        var fileUrl = await _bucketService.UploadFileToS3(invoiceDocument, fileName);
-
-        return fileUrl;
-    }
-
-    private async Task<string> GenerateInvoiceUrl(int id)
-    {
-        var quote = await GetDetailedQuoteDtoAsync(id);
-
         if (quote is null)
             throw new NotFoundException(ExceptionMessages.QUOTE_NOT_FOUND);
 
-        var generateInvoiceUrl = await UploadInvoiceDocument(quote);
+        var quoteDetailedDto = _mapper.Map<QuoteDetailedResponseDTO>(quote);
 
-        return generateInvoiceUrl;
+        return quoteDetailedDto;
     }
 
-    private async Task SaveInvoiceOnQuote(int id)
+    public void AddProductToQuote(Quote quote, QuoteProductsRequestDTO productDto, Product product)
     {
-        var updatedQuote = await _unitOfWork.QuotesRepository.GetAsync(q => q.QuoteId == id);
+        if (quote.QuotesProducts.Any(qp => qp.ProductId == product.ProductId))
+            throw new ConflictException(ExceptionMessages.PRODUCT_DUPLICATED);
 
-        if (updatedQuote is null)
-            throw new NotFoundException(ExceptionMessages.QUOTE_NOT_FOUND);
+        var quoteProduct = _mapper.Map<QuoteProducts>(productDto);
+        quote.QuotesProducts.Add(quoteProduct);
+    }
 
-        updatedQuote.FileUrl = await GenerateInvoiceUrl(id);
+    private async Task<Customer> EnsureCustomerExists(Guid customerId)
+    {
+        var customer = await _unitOfWork.CustomerRepository.GetAsync(c => c.CustomerId == customerId);
 
-        _unitOfWork.QuotesRepository.Update(updatedQuote);
+        if (customer is null)
+            throw new NotFoundException(ExceptionMessages.CUSTOMER_NOT_FOUND);
 
-        await _unitOfWork.CommitAsync();
+        return customer;
+    }
+
+    private async Task<Product> EnsureProductExists(Guid productId)
+    {
+        var product = await _unitOfWork.ProductRepository.GetAsync(e => e.ProductId == productId);
+
+        if (product is null)
+            throw new NotFoundException(ExceptionMessages.PRODUCT_NOT_FOUND);
+
+        return product;
     }
 }
+
+
 

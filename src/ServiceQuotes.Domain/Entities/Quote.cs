@@ -20,8 +20,8 @@ public sealed class Quote
     [StringLength(200)]
     public string? FileUrl { get; set; }
 
-    public DateTime CreatedAt { get; private set; }
-    public DateTime UpdatedAt { get; private set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 
     [Required]
     public Guid CustomerId { get; private set; }

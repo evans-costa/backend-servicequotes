@@ -3,7 +3,7 @@
 namespace ServiceQuotes.Application.Exceptions;
 
 [Serializable]
-public class BadRequestException(string message) : ServiceQuoteException(message)
+public class NotFoundException(string message) : ServiceQuoteException(message)
 {
     public override IList<string> GetErrorMessages()
     {
@@ -15,6 +15,6 @@ public class BadRequestException(string message) : ServiceQuoteException(message
 
     public override HttpStatusCode GetStatusCode()
     {
-        return HttpStatusCode.BadRequest;
+        return HttpStatusCode.NotFound;
     }
 }

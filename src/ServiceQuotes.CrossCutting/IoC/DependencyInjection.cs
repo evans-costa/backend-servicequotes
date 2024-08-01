@@ -31,7 +31,10 @@ public static class DependencyInjection
         {
             options.UseSqlServer(sqlServerConnection, providerOptions =>
             {
-                providerOptions.EnableRetryOnFailure();
+                providerOptions.EnableRetryOnFailure(
+                maxRetryDelay: TimeSpan.FromSeconds(60),
+                maxRetryCount: 6,
+                errorNumbersToAdd: null);
             });
         });
 

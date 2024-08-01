@@ -78,6 +78,7 @@ public class QuoteController : ControllerBase
         _logger.LogInformation("### Create a quote: POST api/quote");
 
         var newQuoteDto = await _quoteService.CreateQuote(quoteWithProductsDto);
+        await _quoteService.SaveInvoiceOnQuote(newQuoteDto.QuoteId);
 
         return new CreatedAtRouteResult("GetQuoteDetailsById", new { id = newQuoteDto.QuoteId }, newQuoteDto);
     }
